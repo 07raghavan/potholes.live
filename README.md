@@ -1,6 +1,6 @@
 # Smooth Road Finder
 
-A real-time pothole detection web application using AI/ML and interactive mapping. Built with React, TypeScript, and ONNX Runtime for on-device machine learning inference.
+A real-time pothole detection web application and interactive mapping. Built with React, TypeScript, and ONNX Runtime for on-device machine learning inference.
 
 ## Features
 
