@@ -1,7 +1,7 @@
 
 # potholes.live
 
-potholes.live is a real-time pothole detection and mapping platform built for speed, privacy, and impact. It uses on-device AI, geospatial technology, and a modern web stack to help users report and visualize road hazards.
+potholes.live is a real-time pothole detection and mapping platform built for speed, privacy, and impact. It uses Yolo based custom trained ML model (edge inferenence), and a modern web stack to help users report and visualize road hazards.
 
 ## Features
 
@@ -9,8 +9,7 @@ potholes.live is a real-time pothole detection and mapping platform built for sp
 - Visual fingerprinting and deduplication to prevent duplicate reports
 - Interactive Mapbox GL map with clustering and heatmaps
 - GPS tracking and route recording with session statistics
-- Offline-first reporting with IndexedDB queue and auto-sync
-- Supabase/Postgres backend with Row Level Security (RLS) and geospatial queries
+- Supabase/Postgres backend with Row Level Security (RLS) 
 - Authentication via email, Google, and GitHub (Supabase Auth)
 - Progressive Web App (PWA) support for mobile and desktop
 - Serverless backend functions (Netlify) for secure token proxying and geocoding
@@ -24,8 +23,6 @@ potholes.live is a real-time pothole detection and mapping platform built for sp
 - Backend: Supabase (Auth, Postgres, PostGIS), Netlify Functions
 - State: React Query (TanStack Query)
 - Routing: React Router v6
-- Offline: IndexedDB, Service Worker
-- Geospatial: Custom quantization, haversine, clustering
 
 ## Project Structure
 
