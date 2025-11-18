@@ -123,7 +123,6 @@ Use Netlify for serverless functions and static hosting. Set environment variabl
 - `tsconfig.json` - TypeScript configuration
 - `netlify.toml` - Netlify deployment settings
 - `components.json` - shadcn/ui components config
-- `supabase-schema-minimal.sql` - Database schema for Supabase
 
 ### Scripts
 
