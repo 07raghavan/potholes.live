@@ -28,10 +28,6 @@ Thank you for your interest in contributing! We welcome pull requests, issues, a
 
 Be respectful, constructive, and collaborative. We aim to foster a welcoming and inclusive environment for all contributors.
 
-## License
-
-By contributing, you agree that your code will be released under the MIT License.
-
 ---
 
-For major changes or questions, please contact @07raghavan.
+For major changes or questions, please contact raghav@pesce.ac.in
