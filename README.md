@@ -143,10 +143,6 @@ Use Netlify for serverless functions and static hosting. Set environment variabl
 - Safari 14+
 - Mobile browsers with camera access
 
-## License
-
-MIT
-
 ## Contributing
 
 See CONTRIBUTING.md for guidelines.
