@@ -5,7 +5,7 @@ import { ArrowLeft, Share2, MapPin, Calendar } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAuth } from '@/contexts/AuthContext';
 import { getReportStore, type PotholeReport } from '@/lib/reportStore';
-import { generateSessionShareImage, reverseGeocode } from '@/lib/share';
+
 import { toast } from '@/hooks/use-toast';
 
 const Profile = () => {
@@ -23,31 +23,33 @@ const Profile = () => {
     (async () => {
       try {
         const store = await getReportStore();
-        // Use optimized subscribeByUser if available (Firestore), otherwise fallback
+        // Use subscribeByUser with the correct user ID field
+        const userId = user.id || user.uid;
+        
         if (store.subscribeByUser) {
           unsub = store.subscribeByUser(
-            user.uid,
+            userId,
             (reports) => {
-              if (!mounted) return; // Don't update if unmounted
+              if (!mounted) return;
               setUserReports(reports);
               setLoading(false);
             }
           );
         } else {
-          // Fallback for InMemoryStore (no subscribeByUser method)
+          // Fallback: subscribe to all and filter client-side
           unsub = store.subscribeNearby(
             { lat: 0, lon: 0 }, 
-            999999, // Very large radius to get all
+            999999,
             (reports) => {
               if (!mounted) return;
-              const filtered = reports.filter(r => r.uid === user.uid);
+              const filtered = reports.filter(r => r.user_id === userId || r.uid === userId);
               setUserReports(filtered);
               setLoading(false);
             }
           );
         }
       } catch (err) {
-        console.error('Failed to load reports:', err);
+        // ...removed console.error for production...
         if (mounted) setLoading(false);
       }
     })();
@@ -58,7 +60,7 @@ const Profile = () => {
         try {
           unsub();
         } catch (error) {
-          console.error('[Profile] Unsub error:', error);
+          // ...removed console.error for production...
         }
       }
     };
@@ -67,42 +69,27 @@ const Profile = () => {
   const handleReShare = async (report: PotholeReport) => {
     setSharingId(report.id);
     try {
-      const points = [{ lat: report.lat, lon: report.lon, timestamp: new Date(report.ts) }];
-      const locationName = await reverseGeocode(report.lat, report.lon);
-      const subtitle = locationName || `${report.lat.toFixed(4)}, ${report.lon.toFixed(4)}`;
+      const shareText = `I mapped a pothole using potholes.live! Help make our roads safer by reporting potholes in real-time. Join me at potholes.live and let's fix our roads together. #PotholesLive #FixOurRoads #RoadSafety #MakeOurRoadsGreatAgain`;
       
-      const blob = await generateSessionShareImage(points, {
-        width: 1200,
-        height: 1200,
-        title: '1 Pothole Mapped',
-        subtitle
-      });
-
-      if (!blob) {
-        toast({ title: '❌ Failed to generate image', variant: 'destructive' });
-        return;
-      }
-
-      // Try Web Share API with file
-      if (navigator.canShare && navigator.canShare({ files: [new File([blob], 'pothole.png', { type: 'image/png' })] })) {
+      if (navigator.share) {
         await navigator.share({
-          title: 'Pothole Detected',
-          text: `Found a pothole at ${subtitle}`,
-          files: [new File([blob], 'pothole.png', { type: 'image/png' })]
+          title: 'Pothole Detected - potholes.live',
+          text: shareText
         });
       } else {
-        // Fallback: download
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `pothole-${report.id}.png`;
-        a.click();
-        URL.revokeObjectURL(url);
-        toast({ title: '📥 Image downloaded', description: 'Check your downloads folder' });
+        await navigator.clipboard.writeText(shareText);
+        toast({ title: 'Copied!', description: 'Share text copied to clipboard' });
       }
     } catch (err) {
-      console.error('Share failed:', err);
-      toast({ title: '❌ Share failed', variant: 'destructive' });
+      // ...removed console.error for production...
+      // Fallback to clipboard
+      try {
+        const shareText = `I mapped a pothole using potholes.live! Help make our roads safer by reporting potholes in real-time. Join me at potholes.live and let's fix our roads together. #PotholesLive #FixOurRoads #RoadSafety #MakeOurRoadsGreatAgain`;
+        await navigator.clipboard.writeText(shareText);
+        toast({ title: 'Copied!', description: 'Share text copied to clipboard' });
+      } catch {
+        toast({ title: '❌ Share failed', variant: 'destructive' });
+      }
     } finally {
       setSharingId(null);
     }
@@ -112,7 +99,7 @@ const Profile = () => {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background p-6">
         <div className="text-center">
-          <h2 className="text-3xl font-bold uppercase mb-4">🔐 Login Required</h2>
+          <h2 className="text-3xl font-bold uppercase mb-4">Login Required</h2>
           <p className="text-lg mb-6">You need to be logged in to view your profile.</p>
           <Link to="/">
             <Button size="lg" className="text-lg font-bold uppercase">
@@ -154,11 +141,11 @@ const Profile = () => {
             <h2 className="text-lg font-bold uppercase mb-2">Total Potholes Mapped</h2>
             <div className="text-6xl font-bold mb-2">{userReports.length}</div>
             <p className="text-sm opacity-90">
-              {userReports.length === 0 ? 'Start detecting to make a difference! 🚀' :
-               userReports.length === 1 ? 'Great start! Keep mapping! 💪' :
-               userReports.length < 10 ? 'You\'re making an impact! 🌟' :
-               userReports.length < 50 ? 'Amazing contribution! 🎉' :
-               'Road safety champion! 🏆'}
+              {userReports.length === 0 ? 'Start detecting to make a difference!' :
+               userReports.length === 1 ? 'Great start! Keep mapping!' :
+               userReports.length < 10 ? 'You\'re making an impact!' :
+               userReports.length < 50 ? 'Amazing contribution!' :
+               'Road safety champion!'}
             </p>
           </div>
         </motion.div>
@@ -171,16 +158,12 @@ const Profile = () => {
             {user.displayName && (
               <p className="text-sm"><span className="font-bold">Name:</span> {user.displayName}</p>
             )}
-            <p className="text-sm text-muted-foreground">
-              Member since {new Date(user.metadata?.creationTime || Date.now()).toLocaleDateString()}
-            </p>
           </div>
         </div>
 
         {/* Reports List */}
         <div className="bg-background rounded-2xl border-4 border-foreground chunky-shadow-sm p-6">
           <h3 className="text-xl font-bold uppercase mb-4">Recent Detections</h3>
-          
           {loading ? (
             <p className="text-center text-muted-foreground py-8">Loading your reports...</p>
           ) : userReports.length === 0 ? (
@@ -190,8 +173,8 @@ const Profile = () => {
           ) : (
             <div className="space-y-4">
               {userReports
-                .sort((a, b) => b.ts - a.ts) // Most recent first
-                .slice(0, 50) // Show last 50
+                .sort((a, b) => b.ts - a.ts)
+                .slice(0, 3)
                 .map((report) => (
                   <motion.div
                     key={report.id}
@@ -205,10 +188,6 @@ const Profile = () => {
                         <span className="text-sm font-bold">
                           {report.lat.toFixed(5)}, {report.lon.toFixed(5)}
                         </span>
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <Calendar size={14} />
-                        <span>{new Date(report.ts).toLocaleString()}</span>
                       </div>
                       {report.conf && (
                         <div className="text-xs text-muted-foreground mt-1">

@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { X, Camera } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { usePotholeWorker } from '@/hooks/use-pothole-worker';
-import { generateSessionShareImage, reverseGeocode } from '@/lib/share';
+import { reverseGeocode } from '@/lib/share';
 import { useAuth } from '@/contexts/AuthContext';
 import AuthModal from './AuthModal';
 import ShareModal from './ShareModal';
@@ -13,7 +13,6 @@ import { GPSTracker } from '@/lib/gps-tracker';
 import { DetectionSmoother } from '@/lib/detection-smoother';
 import { PotholeFingerprintTracker } from '@/lib/pothole-fingerprint';
 import confetti from 'canvas-confetti';
-import { submitSession } from '@/lib/pothole-service';
 
 interface CameraTrayProps {
   isOpen: boolean;
@@ -56,11 +55,10 @@ const buildPlaceHashtag = (location: string) => {
   return `#make${capitalized}RoadsGreatAgain`;
 };
 
-const createShareMessage = (count: number, location: string) => {
-  const label = location || 'my area';
+const createShareMessage = (count: number, location: string, sessionId?: string, coordinates?: { lat: number; lon: number }) => {
   const potholeWord = count === 1 ? 'pothole' : 'potholes';
-  const campaignHashtag = buildPlaceHashtag(label);
-  return `I mapped ${count} ${potholeWord} around ${label} with potholes.live - https://potholes.live\n\n#potholeslive #potholes.live ${campaignHashtag}`;
+  
+  return `Just mapped ${count} ${potholeWord} near my area using potholes.live! I'm helping make our roads safer by reporting potholes in real-time. Join me at potholes.live and let's fix our roads together. #PotholesLive #FixOurRoads #RoadSafety #MakeOurRoadsGreatAgain`;
 };
 
 const CameraTray = ({ isOpen, onClose, onPotholeDetected, gpsPosition }: CameraTrayProps) => {
@@ -83,13 +81,16 @@ const CameraTray = ({ isOpen, onClose, onPotholeDetected, gpsPosition }: CameraT
   const [flash, setFlash] = useState(false);
   const [showRegisterPrompt, setShowRegisterPrompt] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
-  const [shareImageUrl, setShareImageUrl] = useState<string | null>(null);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const detectionLoopRunningRef = useRef(false); // Track if loop is running
   const previousLocationRef = useRef<{ lat: number; lng: number } | null>(null);
   const sessionReportsRef = useRef<SessionReport[]>([]); // Store reports for share image
   const fingerprintTrackerRef = useRef<PotholeFingerprintTracker>(new PotholeFingerprintTracker());
   const shareLocationLabel = useMemo(() => sanitizeLocationName(locationName), [locationName]);
-  const shareMessage = useMemo(() => createShareMessage(potholeCount, shareLocationLabel), [potholeCount, shareLocationLabel]);
+  const shareMessage = useMemo(() => {
+    const coordinates = userLocation ? { lat: userLocation.lat, lon: userLocation.lng } : undefined;
+    return createShareMessage(potholeCount, shareLocationLabel, currentSessionId || undefined, coordinates);
+  }, [potholeCount, shareLocationLabel, currentSessionId, userLocation]);
 
   // Worker-based detector and session dedup - MODEL PRELOADS ON MOUNT!
   const { init, sendVideoFrame, stop: stopWorker, isLoading: modelLoading, isReady, isReadyRef, lastDetections, lastStats, backend } = usePotholeWorker({
@@ -418,29 +419,18 @@ const CameraTray = ({ isOpen, onClose, onPotholeDetected, gpsPosition }: CameraT
       setPotholeCount(reportCount);
       fingerprintTrackerRef.current.reset();
 
-      // Submit session stats to Firebase
+      // Session data already stored in Supabase via reportStore
+      // Each pothole report includes user_id for authenticated users
       if (sessionStart && reportCount > 0) {
         const duration = Math.floor((Date.now() - sessionStart.getTime()) / 1000);
         const reports = sessionReports;
         
-        // Use authenticated user ID or anonymous ID
-        const uid = user?.uid || localStorage.getItem('pl_uid') || (() => { 
-          const id = crypto.randomUUID?.() || `anon_${Date.now()}_${Math.random().toString(36).slice(2)}`; 
-          localStorage.setItem('pl_uid', id); 
-          return id; 
-        })();
-        
-        submitSession({
-          userId: uid,  // Keep as userId for sessions collection (different schema)
-          startedAt: sessionStart.getTime(),
-          endedAt: Date.now(),
-          potholeIds: reports.map(r => r.id),
-          stats: {
-            distance: sessionDistance,
-            duration: duration,
-            count: reportCount,
-          },
-        }).catch(err => console.error('[Firebase] Session submit failed:', err));
+        console.log('[CameraTray] ✅ Session completed:', {
+          potholes: reportCount,
+          duration: `${duration}s`,
+          distance: `${(sessionDistance / 1000).toFixed(2)}km`,
+          reports: reports.length
+        });
       }
 
       // Show share modal if we have findings
@@ -453,23 +443,7 @@ const CameraTray = ({ isOpen, onClose, onPotholeDetected, gpsPosition }: CameraT
         });
         
         setFlash(true);
-        setShareImageUrl(null);
         setShowShareModal(true);
-        // Generate the share image in the background so the modal can appear instantly
-        void generateShareImage().then((imageUrl) => {
-          if (!imageUrl) {
-            setShareImageUrl(null);
-            toast({ title: 'Map preview unavailable', description: 'You can still share the update without the image.' });
-            return;
-          }
-          setShareImageUrl((prev) => {
-            if (prev) URL.revokeObjectURL(prev);
-            return imageUrl;
-          });
-        }).catch((error) => {
-          console.error('[CameraTray] ❌ Share image failed:', error);
-          toast({ title: 'Share image failed', description: 'Please try again in a moment.', variant: 'destructive' });
-        });
         setTimeout(() => setFlash(false), 250);
         
         // Prompt for registration if user not logged in (after share modal is closed)
@@ -552,16 +526,12 @@ const CameraTray = ({ isOpen, onClose, onPotholeDetected, gpsPosition }: CameraT
       }
       
       const points = reports.map(r => ({ lat: r.lat, lon: r.lon }));
-      const cent = points.reduce((acc, p) => ({ lat: acc.lat + p.lat, lon: acc.lon + p.lon }), { lat: 0, lon: 0 });
-      if (points.length > 0) { cent.lat /= points.length; cent.lon /= points.length; }
-      const place = await reverseGeocode(cent.lat, cent.lon);
-      const subtitle = place ? place.split(',')[0] : '';
       
       console.log('[CameraTray] 🗺️ Generating map image with', points.length, 'points');
       
       const blob = await generateSessionShareImage(points, { 
-        title: 'potholes.live', 
-        subtitle,
+        title: 'potholes.live',
+        subtitle: '', // No location in image
         stats: {
           distance: sessionDistance,
         }
@@ -578,55 +548,27 @@ const CameraTray = ({ isOpen, onClose, onPotholeDetected, gpsPosition }: CameraT
 
   // Handle share from modal
   const handleShare = async () => {
-    const shareText = `🚨 I found ${potholeCount} pothole${potholeCount === 1 ? '' : 's'} in ${locationName} using Potholes.live!\n\n📍 Help make our roads safer by reporting potholes.\n\n👉 Tag your district administration or responsible ministers/politicians to take action!\n\n#FixOurRoads #PotholeAlert #RoadSafety`;
     try {
-      // Convert blob URL back to blob for sharing
-      if (shareImageUrl) {
-        const response = await fetch(shareImageUrl);
-        const blob = await response.blob();
-        const file = new File([blob], 'potholes-live.png', { type: 'image/png' });
-        
-        if ((navigator as any).canShare && (navigator as any).canShare({ files: [file] })) {
-          await navigator.share({ title: 'Potholes.live', text: shareMessage, files: [file] as any });
-        } else if (navigator.share) {
-          await navigator.share({ title: 'Potholes.live', text: shareMessage });
-        } else {
-          // Download fallback
-          const a = document.createElement('a');
-          a.href = shareImageUrl;
-          a.download = 'potholes-live.png';
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          await navigator.clipboard.writeText(shareMessage);
-          toast({ title: '⬇️ Image saved', description: 'Share text copied to clipboard' });
-        }
+      if (navigator.share) {
+        await navigator.share({ title: 'Potholes.live', text: shareMessage });
       } else {
-        // Text only fallback
-        if (navigator.share) {
-          await navigator.share({ title: 'Potholes.live', text: shareMessage });
-        } else {
-          await navigator.clipboard.writeText(shareMessage);
-          toast({ title: '📋 Copied!', description: 'Share text copied to clipboard' });
-        }
+        await navigator.clipboard.writeText(shareMessage);
+        toast({ title: 'Copied!', description: 'Share text copied to clipboard' });
       }
-      
       setShowShareModal(false);
     } catch (e) {
       console.error('Share failed:', e);
-      // Fallback to text-only on error
-      if (navigator.share) await navigator.share({ title: 'Potholes.live', text: shareMessage });
-      else await navigator.clipboard.writeText(shareMessage);
+      // Fallback to clipboard
+      try {
+        await navigator.clipboard.writeText(shareMessage);
+        toast({ title: 'Copied!', description: 'Share text copied to clipboard' });
+      } catch (clipboardError) {
+        toast({ title: '❌ Share failed', description: 'Unable to share or copy text', variant: 'destructive' });
+      }
     }
   };
 
-  useEffect(() => {
-    return () => {
-      if (shareImageUrl) {
-        URL.revokeObjectURL(shareImageUrl);
-      }
-    };
-  }, [shareImageUrl]);
+
 
   const handleClose = () => {
     if (stream) {
@@ -841,16 +783,12 @@ const CameraTray = ({ isOpen, onClose, onPotholeDetected, gpsPosition }: CameraT
           isOpen={showShareModal}
           onClose={() => {
             setShowShareModal(false);
-            setShareImageUrl(prev => {
-              if (prev) URL.revokeObjectURL(prev);
-              return null;
-            });
             // Show registration prompt after closing share modal if user not logged in
             if (!user && potholeCount > 0) {
               setTimeout(() => setShowRegisterPrompt(true), 500);
             }
           }}
-          imageUrl={shareImageUrl}
+          imageUrl={null}
           potholeCount={potholeCount}
           locationName={shareLocationLabel} 
           onShare={handleShare}

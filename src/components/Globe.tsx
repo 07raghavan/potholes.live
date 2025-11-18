@@ -23,15 +23,36 @@ type ViewStateType = {
 const MAP_STYLE = 'mapbox://styles/mapbox/navigation-night-v1';
 
 // Fetch Mapbox token from secure Netlify Function (not exposed in frontend bundle)
+// Falls back to environment variable in development
 let cachedMapboxToken: string | null = null;
 
 async function getMapboxToken(): Promise<string | null> {
   if (cachedMapboxToken) return cachedMapboxToken;
   
+  // In development (localhost), use environment variable directly
+  if (import.meta.env.DEV || window.location.hostname === 'localhost') {
+    const envToken = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
+    if (envToken) {
+      console.log('[Globe] 🔧 Using Mapbox token from environment (dev mode)');
+      cachedMapboxToken = envToken;
+      return cachedMapboxToken;
+    }
+  }
+  
+  // In production, fetch from Netlify function
   try {
     const res = await fetch('/.netlify/functions/mapbox-token');
     if (!res.ok) {
       console.error('[Globe] Failed to fetch Mapbox token:', res.status);
+      
+      // Final fallback: try environment variable even in production
+      const envToken = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
+      if (envToken) {
+        console.warn('[Globe] ⚠️ Using fallback Mapbox token from environment');
+        cachedMapboxToken = envToken;
+        return cachedMapboxToken;
+      }
+      
       return null;
     }
     const data = await res.json();
@@ -39,6 +60,15 @@ async function getMapboxToken(): Promise<string | null> {
     return cachedMapboxToken;
   } catch (error) {
     console.error('[Globe] Error fetching Mapbox token:', error);
+    
+    // Final fallback: try environment variable
+    const envToken = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
+    if (envToken) {
+      console.warn('[Globe] ⚠️ Using fallback Mapbox token from environment');
+      cachedMapboxToken = envToken;
+      return cachedMapboxToken;
+    }
+    
     return null;
   }
 }

@@ -36,7 +36,7 @@ const Index = () => {
   // Debug: Log GPS updates
   useEffect(() => {
     if (currentGpsPosition) {
-      console.log('[Index] 🌍 GPS update from Globe:', currentGpsPosition);
+      // ...removed console.log for production...
     }
   }, [currentGpsPosition]);
   
@@ -103,9 +103,15 @@ const Index = () => {
       timestamp: new Date(),
     };
     setPotholes(prev => [...prev, newPothole]);
-    // Use authenticated user ID if available, fallback to anonymous ID
-    const uid = user?.uid || localStorage.getItem('pl_uid') || (() => { const id = crypto.randomUUID?.() || String(Math.random()); localStorage.setItem('pl_uid', id); return id; })();
-    const rep: PotholeReport = { id: newPothole.id, lat: newPothole.lat, lon: newPothole.lng, ts: newPothole.timestamp.getTime(), uid };
+    // Always use authenticated user ID from Supabase Auth
+    const userId = user?.id || null;
+    const rep: PotholeReport = {
+      id: newPothole.id,
+      lat: newPothole.lat,
+      lon: newPothole.lng,
+      ts: newPothole.timestamp.getTime(),
+      user_id: userId
+    };
     if (storeRef.current && typeof storeRef.current.addReport === 'function') {
       storeRef.current.addReport(rep).catch(() => {});
     }
@@ -119,6 +125,26 @@ const Index = () => {
     } catch (err: any) {
       toast({ title: '❌ Error', description: err?.message || 'Failed to sign out', variant: 'destructive' });
     }
+  };
+
+  // Handle camera open - require authentication first
+  const handleCameraOpen = () => {
+    if (!user) {
+      // Not authenticated - show auth modal
+      // ...removed console.log for production...
+      setAuthModalMode('signup');
+      setAuthModalOpen(true);
+      toast({ 
+        title: '🔒 Sign in required', 
+        description: 'Please sign in or create an account to detect potholes',
+        duration: 3000
+      });
+      return;
+    }
+    
+    // Authenticated - open camera
+    // ...removed console.log for production...
+    setIsCameraTrayOpen(true);
   };
 
   // Subscribe to nearby reports so all users see new ones instantly
@@ -151,7 +177,7 @@ const Index = () => {
         }
       );
     } catch (error) {
-      console.error('[Index] Subscription error:', error);
+      // ...removed console.error for production...
     }
     
     return () => {
@@ -160,7 +186,7 @@ const Index = () => {
         try {
           unsub();
         } catch (error) {
-          console.error('[Index] Unsub error:', error);
+          // ...removed console.error for production...
         }
       }
     };
@@ -349,7 +375,7 @@ const Index = () => {
                 dragMomentum: false,
                 onDragEnd: (_: any, info: any) => {
                   if (info.offset.y < -20) {
-                    setIsCameraTrayOpen(true);
+                    handleCameraOpen();
                   }
                 }
               } : {})}
@@ -360,14 +386,14 @@ const Index = () => {
                 if (isDesktop && swipeStartYRef.current !== null) {
                   const endY = (e as any).clientY ?? 0;
                   if (swipeStartYRef.current - endY > 20) {
-                    setIsCameraTrayOpen(true);
+                    handleCameraOpen();
                   }
                   swipeStartYRef.current = null;
                 }
               }}
               onClick={(e) => {
                 e.stopPropagation();
-                setIsCameraTrayOpen(true);
+                handleCameraOpen();
               }}
               whileHover={{ y: -5 }}
               whileTap={{ scale: 0.98 }}
@@ -377,24 +403,24 @@ const Index = () => {
               <div 
                 onClick={(e) => {
                   e.stopPropagation();
-                  setIsCameraTrayOpen(true);
+                  handleCameraOpen();
                 }}
-                className="bg-background border-t-4 border-foreground rounded-t-3xl pt-2 pb-3 px-6 text-center chunky-shadow-lg select-none hover:bg-primary/5 transition-colors cursor-pointer"
+                className="bg-background border-t-4 border-foreground rounded-t-3xl pt-3 pb-6 px-6 text-center chunky-shadow-lg select-none hover:bg-primary/5 transition-colors cursor-pointer"
               >
                 {/* Swipe Indicator */}
-                <div className="w-12 h-1.5 bg-muted-foreground rounded-full mb-1 mx-auto opacity-50" />
+                <div className="w-12 h-1.5 bg-muted-foreground rounded-full mb-2 mx-auto opacity-50" />
                 <motion.div
                   animate={{ y: [0, -5, 0] }}
                   transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
-                  className="mb-1"
+                  className="mb-2"
                 >
-                  <ChevronUp size={20} className="text-primary mx-auto" strokeWidth={3} />
+                  <ChevronUp size={24} className="text-primary mx-auto" strokeWidth={3} />
                 </motion.div>
                 <div className="flex items-center justify-center gap-2">
-                  <p className="text-base font-bold uppercase tracking-tight">
+                  <p className="text-lg font-bold uppercase tracking-tight">
                     {isDesktop ? 'Click to start' : 'Swipe up to start'}
                   </p>
-                  <img src="/icon-192.png" alt="Pothole" className="w-4 h-4" />
+                  <img src="/icon-192.png" alt="Pothole" className="w-5 h-5" />
                 </div>
               </div>
             </motion.div>

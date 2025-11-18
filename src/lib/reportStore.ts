@@ -102,7 +102,6 @@ export class FirestoreReportStore implements ReportStore {
     
     // Calculate rough bounding box (1 degree ≈ 111km)
     const latRange = 0.0001; // ~10m
-    const lonRange = 0.0001;
     
     const q = query(
       collection(this.db, 'potholeReports'),
@@ -112,18 +111,27 @@ export class FirestoreReportStore implements ReportStore {
     
     const snapshot = await getDocs(q);
     
-    // Check if any existing pothole is within 10m
+    // Check if any existing pothole is within 5m (reduced threshold for better accuracy)
     for (const doc of snapshot.docs) {
       const existing = doc.data();
+      const existingLat = this.asNumber(existing.lat ?? existing.latitude);
+      const existingLon = this.asNumber(existing.lon ?? existing.lng ?? existing.longitude);
+
+      if (existingLat === null || existingLon === null) {
+        continue;
+      }
+
       const distance = this.calculateDistance(
-        rep.lat, rep.lon,
-        existing.lat, existing.lon
+        rep.lat,
+        rep.lon,
+        existingLat,
+        existingLon
       );
       
-      if (distance < 10) {
-        console.log('[ReportStore] ⚠️ Duplicate pothole within 10m - skipping', {
+      if (distance < 5) {
+        console.log('[ReportStore] ⚠️ Duplicate pothole within 5m - skipping', {
           new: `${rep.lat.toFixed(6)}, ${rep.lon.toFixed(6)}`,
-          existing: `${existing.lat?.toFixed(6)}, ${existing.lon?.toFixed(6)}`,
+          existing: `${existingLat.toFixed(6)}, ${existingLon.toFixed(6)}`,
           distance: distance.toFixed(1) + 'm'
         });
         return; // Skip duplicate
@@ -132,7 +140,13 @@ export class FirestoreReportStore implements ReportStore {
     
     // No duplicates found - add new pothole
     const { addDoc } = await import('firebase/firestore');
-    await addDoc(collection(this.db, 'potholeReports'), rep);
+    await addDoc(collection(this.db, 'potholeReports'), {
+      ...rep,
+      // Backwards compatibility for older schema
+      lng: rep.lon,
+      detectedAt: rep.ts,
+      timestamp: rep.ts,
+    });
     console.log('[ReportStore] ✅ Added new pothole:', rep.lat.toFixed(6), rep.lon.toFixed(6));
   }
   
@@ -155,7 +169,12 @@ export class FirestoreReportStore implements ReportStore {
     const col = collection(this.db, 'potholeReports');
     for (const r of reps) {
       const ref = doc(col);
-      batch.set(ref, r);
+      batch.set(ref, {
+        ...r,
+        lng: r.lon,
+        detectedAt: r.ts,
+        timestamp: r.ts,
+      });
     }
     await batch.commit();
   }
@@ -166,27 +185,87 @@ export class FirestoreReportStore implements ReportStore {
   ): Unsubscribe {
     let stopped = false;
     const setup = async () => {
-      const { collection, query, orderBy, onSnapshot, limit } = await import('firebase/firestore');
-      // Query ALL potholes - no time or distance filters
-      const q = query(
-        collection(this.db, 'potholeReports'),
-        orderBy('ts', 'desc'),
-        limit(5000) // Increased limit to show more potholes
-      );
-      const unsub = onSnapshot(q, (snap) => {
-        if (stopped) return;
-        const all: PotholeReport[] = [];
-        snap.forEach((doc) => {
-          const d = doc.data() as any;
-          if (typeof d.lat === 'number' && typeof d.lon === 'number' && typeof d.ts === 'number') {
-            all.push({ id: doc.id, lat: d.lat, lon: d.lon, ts: d.ts, uid: d.uid, model: d.model, conf: d.conf });
+      try {
+        const { collection, onSnapshot } = await import('firebase/firestore');
+
+        console.log('[ReportStore] 🔄 Setting up Firestore listener...');
+
+        // Query all pothole reports and sort client-side for schema flexibility
+        // Note: No limit or orderBy to avoid 400 errors on new/empty databases
+        const col = collection(this.db, 'potholeReports');
+        
+        // We'll keep a polling fallback in case the WebChannel listener fails
+        let fallbackInterval: any = null;
+        let lastSnapshotSuccess = false;
+
+        const processSnapshot = (snap: any) => {
+          if (stopped) return;
+          const all: PotholeReport[] = [];
+          snap.forEach((doc: any) => {
+            const normalized = this.normalizeReportDoc(doc.id, doc.data());
+            if (normalized) all.push(normalized);
+          });
+          all.sort((a, b) => b.ts - a.ts);
+          console.log('[ReportStore] 📍 Loaded', all.length, 'potholes from Firebase (potholeReports collection)');
+          cb(all);
+        };
+
+        // Real-time listener
+        const unsub = onSnapshot(
+          col,
+          (snap) => {
+            lastSnapshotSuccess = true;
+            // If we had a polling fallback running, stop it
+            if (fallbackInterval) {
+              clearInterval(fallbackInterval);
+              fallbackInterval = null;
+              console.log('[ReportStore] 🔁 Cleared polling fallback after successful snapshot');
+            }
+            processSnapshot(snap);
+          },
+          (error: any) => {
+            console.error('[ReportStore] ❌ Firestore listener error:', error);
+            console.error('[ReportStore] Error code:', error?.code);
+            console.error('[ReportStore] Error message:', error?.message);
+
+            if (error?.code === 'permission-denied') {
+              console.error('[ReportStore] 🚫 Permission denied - check Firestore rules');
+              return;
+            }
+
+            // Start polling fallback if not already started
+            if (!fallbackInterval) {
+              console.warn('[ReportStore] ⚠️ Starting polling fallback (getDocs) due to listener error');
+              const startPolling = async () => {
+                try {
+                  const { getDocs } = await import('firebase/firestore');
+                  // Initial immediate poll
+                  const snap = await getDocs(col as any);
+                  processSnapshot(snap);
+                } catch (e: any) {
+                  console.error('[ReportStore] ❌ Polling fetch failed:', e?.message || e);
+                }
+              };
+
+              // Run immediately then every 5s
+              startPolling();
+              fallbackInterval = setInterval(startPolling, 5000);
+            }
+          }
+        );
+
+        this.unsubscribers.add(() => {
+          try {
+            unsub();
+          } catch (e) {}
+          if (fallbackInterval) {
+            clearInterval(fallbackInterval);
+            fallbackInterval = null;
           }
         });
-        // Return ALL potholes - no filtering
-        console.log('[ReportStore] 📍 Loaded', all.length, 'potholes from Firebase (no filters)');
-        cb(all);
-      });
-      this.unsubscribers.add(unsub);
+      } catch (error: any) {
+        console.error('[ReportStore] ❌ Failed to setup Firestore listener:', error);
+      }
     };
     setup();
     return () => {
@@ -202,23 +281,21 @@ export class FirestoreReportStore implements ReportStore {
   ): Unsubscribe {
     let stopped = false;
     const setup = async () => {
-      const { collection, query, where, orderBy, onSnapshot, limit } = await import('firebase/firestore');
+      const { collection, query, where, onSnapshot, limit } = await import('firebase/firestore');
       // Optimized query: filter by uid server-side, only last 50 reports
       const q = query(
         collection(this.db, 'potholeReports'),
         where('uid', '==', userId),
-        orderBy('ts', 'desc'),
         limit(50)
       );
       const unsub = onSnapshot(q, (snap) => {
         if (stopped) return;
         const reports: PotholeReport[] = [];
         snap.forEach((doc) => {
-          const d = doc.data() as any;
-          if (typeof d.lat === 'number' && typeof d.lon === 'number' && typeof d.ts === 'number') {
-            reports.push({ id: doc.id, lat: d.lat, lon: d.lon, ts: d.ts, uid: d.uid, model: d.model, conf: d.conf });
-          }
+          const normalized = this.normalizeReportDoc(doc.id, doc.data());
+          if (normalized) reports.push(normalized);
         });
+        reports.sort((a, b) => b.ts - a.ts);
         cb(reports);
       });
       this.unsubscribers.add(unsub);
@@ -230,11 +307,65 @@ export class FirestoreReportStore implements ReportStore {
       this.unsubscribers.clear();
     };
   }
+
+  private normalizeReportDoc(id: string, data: any): PotholeReport | null {
+    if (!data) return null;
+
+    const lat = this.asNumber(data.lat ?? data.latitude);
+    const lon = this.asNumber(data.lon ?? data.lng ?? data.longitude);
+    const ts = this.extractTimestamp(data);
+
+    if (lat === null || lon === null || ts === null) {
+      console.warn('[ReportStore] ⚠️ Skipping malformed pothole doc', { id, lat, lon, ts, data });
+      return null;
+    }
+
+    const conf = this.asNumber(data.conf ?? data.confidence ?? data.score ?? data.accuracy);
+
+    return {
+      id,
+      lat,
+      lon,
+      ts,
+      uid: typeof data.uid === 'string' ? data.uid : undefined,
+      model: typeof data.model === 'string' ? data.model : undefined,
+      conf: conf ?? undefined,
+    };
+  }
+
+  private asNumber(value: any): number | null {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string') {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    if (value && typeof value.toMillis === 'function') {
+      const millis = value.toMillis();
+      return Number.isFinite(millis) ? millis : null;
+    }
+    return null;
+  }
+
+  private extractTimestamp(data: any): number | null {
+    const candidates = [
+      data.ts,
+      data.detectedAt,
+      data.timestamp,
+      data.createdAt,
+      data.updatedAt,
+    ];
+
+    for (const candidate of candidates) {
+      const ts = this.asNumber(candidate);
+      if (ts !== null) return ts;
+    }
+
+    return null;
+  }
 }
 
 export async function getReportStore(): Promise<ReportStore> {
-  const { getDb } = await import('./firebase');
-  const db = await getDb();
-  if (db) return new FirestoreReportStore(db);
-  return new InMemoryReportStore();
+  // Use Supabase instead of Firebase
+  const { getReportStore: getSupabaseStore } = await import('./reportStore-supabase');
+  return getSupabaseStore();
 }

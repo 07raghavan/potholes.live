@@ -95,7 +95,7 @@ export class PotholeFingerprintTracker {
   ): { allDetections: Detection[], newPotholesToCount: PotholeFingerprint[] } {
     const now = Date.now();
     const newPotholesToCount: PotholeFingerprint[] = [];
-    const confidenceFloor = 0.65; // Ignore low-confidence detections (likely artifacts/shadows)
+    const confidenceFloor = 0.40; // Ignore low-confidence detections (likely artifacts/shadows)
     
     // Clean up old fingerprints (haven't been seen in TTL window)
     for (const [id, fp] of this.fingerprints.entries()) {

@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { onAuthStateChanged } from '@/lib/auth';
-import { createOrUpdateUserProfile } from '@/lib/user-service';
 
 interface AuthContextType {
   user: any | null;
@@ -14,25 +13,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let unsub: (() => void) | null = null;
+    console.log('[AuthContext] 🔄 Setting up auth listener...');
     
-    (async () => {
-      // Listen for auth state changes once on mount
-      unsub = await onAuthStateChanged((u) => {
-        setUser(u);
-        setLoading(false);
-        
-        // Create/update user profile in Firestore
-        if (u) {
-          createOrUpdateUserProfile(u).catch(err => {
-            console.error('[AuthContext] Profile creation failed:', err);
-          });
-        }
-      });
-    })();
+    // Listen for auth state changes
+    const unsub = onAuthStateChanged((u) => {
+      console.log('[AuthContext] 👤 Auth state changed:', u?.id || 'null');
+      setUser(u);
+      setLoading(false);
+    });
     
     return () => {
-      if (unsub) unsub();
+      console.log('[AuthContext] 🔌 Cleaning up auth listener');
+      unsub();
     };
   }, []);
 

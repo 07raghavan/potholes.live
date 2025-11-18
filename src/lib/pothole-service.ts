@@ -122,19 +122,19 @@ export async function submitPothole(pothole: Omit<PotholeReport, 'id' | 'status'
 
     const { collection, addDoc, serverTimestamp, query, where, getDocs } = await import('firebase/firestore');
     
-    // Check for duplicates within 10m radius (expanded from 5m for better coverage)
-    const latRange = 0.0001; // ~10m
-    const lonRange = 0.0001;
+    // Check for duplicates within 3m radius
+    const latRange = 0.00003; // ~3m
+    const lonRange = 0.00003;
     
     const q = query(
-      collection(db, 'potholes'),
+      collection(db, 'potholeReports'),
       where('lat', '>=', pothole.lat - latRange),
       where('lat', '<=', pothole.lat + latRange)
     );
     
     const snapshot = await getDocs(q);
     
-    // Check if any existing pothole is within 10m
+    // Check if any existing pothole is within 3m
     for (const doc of snapshot.docs) {
       const existing = doc.data();
       const distance = calculateDistance(
@@ -142,8 +142,8 @@ export async function submitPothole(pothole: Omit<PotholeReport, 'id' | 'status'
         existing.lat, existing.lng
       );
       
-      if (distance < 10) {
-        console.log('[PotholeService] ⚠️ Duplicate pothole within 10m - skipping', {
+      if (distance < 3) {
+        console.log('[PotholeService] ⚠️ Duplicate pothole within 3m - skipping', {
           new: `${pothole.lat.toFixed(6)}, ${pothole.lng.toFixed(6)}`,
           existing: `${existing.lat?.toFixed(6)}, ${existing.lng?.toFixed(6)}`,
           distance: distance.toFixed(1) + 'm'
@@ -153,7 +153,7 @@ export async function submitPothole(pothole: Omit<PotholeReport, 'id' | 'status'
     }
     
     // No duplicates found - add new pothole
-    const docRef = await addDoc(collection(db, 'potholes'), {
+    const docRef = await addDoc(collection(db, 'potholeReports'), {
       ...report,
       createdAt: serverTimestamp(),
     });
@@ -183,7 +183,7 @@ export async function syncOfflineQueue(): Promise<number> {
 
       const { collection, addDoc, serverTimestamp } = await import('firebase/firestore');
       
-      await addDoc(collection(db, 'potholes'), {
+      await addDoc(collection(db, 'potholeReports'), {
         ...pothole,
         createdAt: serverTimestamp(),
       });
@@ -216,7 +216,7 @@ export function subscribeToPotholes(
       const { collection, query, where, onSnapshot } = await import('firebase/firestore');
 
       const q = query(
-        collection(db, 'potholes'),
+        collection(db, 'potholeReports'),
         where('lat', '>=', bounds.south),
         where('lat', '<=', bounds.north)
         // Note: Firestore allows only one range query per compound query

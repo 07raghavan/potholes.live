@@ -13,16 +13,6 @@
           "order": "DESCENDING"
         }
       ]
-    },
-    {
-      "collectionGroup": "potholeReports",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "ts",
-          "order": "DESCENDING"
-        }
-      ]
     }
   ],
   "fieldOverrides": []

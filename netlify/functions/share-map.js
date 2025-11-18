@@ -84,7 +84,7 @@ export default async (req, context) => {
     if (overlay.endsWith(',')) overlay = overlay.slice(0, -1);
     overlay = overlay ? `${overlay}/` : '';
 
-    const url = `https://api.mapbox.com/styles/v1/${encodeURIComponent(style)}/static/${overlay}${centerParam}/${mapWidth}x${mapHeight}@2x?access_token=${encodeURIComponent(token)}`;
+    const url = `https://api.mapbox.com/styles/v1/${style}/static/${overlay}${centerParam}/${mapWidth}x${mapHeight}@2x?access_token=${encodeURIComponent(token)}&logo=false&attribution=false`;
 
     const res = await fetch(url);
     if (!res.ok) {

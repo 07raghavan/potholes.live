@@ -19,7 +19,7 @@ export async function createOrUpdateUserProfile(user: any): Promise<void> {
   try {
     const db = await getDb();
     if (!db) {
-      console.warn('[UserService] Firebase not initialized, skipping profile creation');
+      // ...removed console.warn for production...
       return;
     }
 
@@ -39,9 +39,9 @@ export async function createOrUpdateUserProfile(user: any): Promise<void> {
       potholeCount: 0,
     }, { merge: true });
 
-    console.log('[UserService] User profile created/updated:', user.uid);
+    // ...removed console.log for production...
   } catch (error) {
-    console.error('[UserService] Failed to create user profile:', error);
+    // ...removed console.error for production...
     // Don't throw - profile creation failure shouldn't block auth
   }
 }
@@ -62,7 +62,7 @@ export async function incrementUserPotholeCount(userId: string, incrementBy: num
       lastActive: serverTimestamp(),
     } as any);
   } catch (error) {
-    console.error('[UserService] Failed to increment pothole count:', error);
+    // ...removed console.error for production...
   }
 }
 
@@ -84,7 +84,7 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
     }
     return null;
   } catch (error) {
-    console.error('[UserService] Failed to get user profile:', error);
+    // ...removed console.error for production...
     return null;
   }
 }
